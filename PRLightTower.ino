@@ -13,8 +13,8 @@
 //This project needs the FastLED library - link in the description.
 #include "FastLED.h"
 
-//The total number of LEDs being used is 75
-#define NUM_LEDS 75
+//The total number of LEDs being used is 77
+#define NUM_LEDS 77
 
 // The data pin for the NeoPixel strip is connected to digital Pin 6 on the Feather
 #define LED_PIN 15
@@ -31,23 +31,14 @@ static char *connectionString;
 static char *ssid;
 static char *pass;
 
+#pragma region LED variables setup
+//###############################################
 bool gReverseDirection = false;
 
 //Initialise the LED array, the LED Hue (ledh) array, and the LED Brightness (ledb) array.
 CRGB leds[NUM_LEDS];
 
 typedef void (*SimplePatternList[])();
-
-void setup() {
-  delay(3000); // sanity delay
-  //Do something simple here to delay start
-  pinMode(0, OUTPUT);
-  BlinkRed(5);
-  FastLED.addLeds<CHIPSET, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  FastLED.setBrightness( BRIGHTNESS );
-}
-
-//###############################################
 //FOR gPatterns:
 //SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle, bpm };
 SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle};
@@ -55,22 +46,153 @@ SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, 
 
 uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
+
+#define NUM_LEDS_RINGS 5
+
+#define NUM_LEDS_RING_01 22
+#define NUM_LEDS_RING_02 19
+#define NUM_LEDS_RING_03 16
+#define NUM_LEDS_RING_04 13
+#define NUM_LEDS_RING_05 4
+
+int leds_ring_01[NUM_LEDS_RING_01]; //0-21
+int leds_ring_02[NUM_LEDS_RING_02]; //22-41
+int leds_ring_03[NUM_LEDS_RING_03]; //42-58
+int leds_ring_04[NUM_LEDS_RING_04]; //59-72
+int leds_ring_05[NUM_LEDS_RING_05];  //73-77
+
+int *led_rings[NUM_LEDS_RINGS]{ leds_ring_01,leds_ring_02,leds_ring_03,leds_ring_04,leds_ring_05 };
+int led_ring_counts[NUM_LEDS_RINGS]{ NUM_LEDS_RING_01, NUM_LEDS_RING_02,NUM_LEDS_RING_03, NUM_LEDS_RING_04, NUM_LEDS_RING_05};
+
 //###############################################
 
-void loop() {
-  // Add entropy to random number generator; we use a lot of it.
-  random16_add_entropy( random(10));
+#pragma endregion
 
-  gPatterns[gCurrentPatternNumber]();
-  //Fire2012(); // run simulation frame
+void setup() {
+  delay(3000); // sanity delay
+  //Do something simple here to delay start
+  pinMode(0, OUTPUT);
+  BlinkRed(5);
+
+  FastLED.addLeds<CHIPSET, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
+  FastLED.setBrightness( BRIGHTNESS );
   
-  FastLED.show(); // display this frame
-  FastLED.delay(1000 / FRAMES_PER_SECOND);
+  setupLedRingArrays();
+  BlinkRed(2);
+ 
+}
 
-  // for gPatterns, do some periodic updates
-  EVERY_N_MILLISECONDS( 20 ) { gHue++; } // slowly cycle the "base color" through the rainbow
-  EVERY_N_SECONDS( SECONDS_BETWEEN_PATTERN ) { nextPattern(); } // change patterns periodically
+void setupLedRingArrays() {
+    int currentLed = 0;
+    for (unsigned int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
+    {
+        //hit each ring if is modulus of the loop number
+        for (unsigned int a = 0; a < led_ring_counts[x]; a = a + 1) {
+            if (currentLed < NUM_LEDS) {
+                led_rings[x][a] = currentLed;
+            }
+            currentLed++;
+        }
+    }
+}
 
+
+void loop() {
+
+    //enter the demo loop...
+    singleDotCrawl();
+
+    lightRingCrawl();
+
+    lightColumnCrawl();
+    lightColumnCrawl();
+}
+
+void singleDotCrawl() 
+{
+    FastLED.setBrightness(150);
+    for (int x = 0; x < NUM_LEDS; x++)
+    {
+        for (int i = 0; i < NUM_LEDS; i++) 
+        {
+            leds[i].setRGB(0, 0, 0);
+        }
+        
+        //leds[x] += CRGB::White;
+
+        leds[x].setRGB(100, 100, 100);
+        
+        FastLED.show();
+        delay(1);
+    }
+}
+
+
+void lightRingCrawl() {
+
+    for (int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
+    {
+        //all black
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            leds[i].setRGB(0, 0, 0);
+        }
+        //hit each ring if is modulus of the loop number
+        for (int a = 0; a < led_ring_counts[x]; a = a + 1) {
+            leds[led_rings[x][a]].setRGB(100, 100, 100);
+            int idebugger = 0;
+        }
+        FastLED.show();
+        delay(150);
+    }
+}
+
+void lightColumnCrawl() {
+
+    double threeSixty = 365;
+    //reset all the lights
+    for (double d = 0; d < 365; d = d +3)
+    {
+        clearLEDs();
+        for (int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
+        {
+            double thisRingCount = led_ring_counts[x];
+            double degreeConversionfactor = thisRingCount / threeSixty;
+            //hit LED in the ring that matches the degress
+            int indexOfLedToLight = degreeConversionfactor * d;
+            if (led_ring_counts[x] > indexOfLedToLight)
+            {
+                int stripIndex = led_rings[x][indexOfLedToLight];
+                leds[stripIndex].setRGB(100, 100, 100);
+            }
+        }
+        FastLED.show();
+        delay(1);
+    }
+}
+
+
+void clearLEDs() {
+    for (int i = 0; i < NUM_LEDS; i++)
+    {
+        leds[i].setRGB(0, 0, 0);
+    }
+}
+void demoLoop() {
+    while (1) {
+        // Add entropy to random number generator; we use a lot of it.
+        random16_add_entropy(random(10));
+
+        gPatterns[gCurrentPatternNumber]();
+        //Fire2012(); // run simulation frame
+
+        FastLED.show(); // display this frame
+        FastLED.delay(1000 / FRAMES_PER_SECOND);
+
+        // for gPatterns, do some periodic updates
+        EVERY_N_MILLISECONDS(20) { gHue++; } // slowly cycle the "base color" through the rainbow
+        EVERY_N_SECONDS(SECONDS_BETWEEN_PATTERN) { nextPattern(); } // change patterns periodically
+    }
 }
 
 //=======================================================================================
@@ -84,6 +206,7 @@ void BlinkRed(int count){
   }
 }
 
+#pragma region LED Program Code
 
 //############################################################################################
 //=======================================================================================
@@ -226,4 +349,7 @@ void Fire2012()
       leds[pixelnumber] = color;
     }
 }
+
+#pragma endregion
+
 //#####################################################################################
