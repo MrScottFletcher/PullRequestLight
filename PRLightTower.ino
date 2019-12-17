@@ -50,16 +50,16 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define NUM_LEDS_RINGS 5
 
 #define NUM_LEDS_RING_01 22
-#define NUM_LEDS_RING_02 19
-#define NUM_LEDS_RING_03 16
+#define NUM_LEDS_RING_02 20 //20
+#define NUM_LEDS_RING_03 17 //17
 #define NUM_LEDS_RING_04 13
 #define NUM_LEDS_RING_05 4
 
 int leds_ring_01[NUM_LEDS_RING_01]; //0-21
-int leds_ring_02[NUM_LEDS_RING_02]; //22-41
-int leds_ring_03[NUM_LEDS_RING_03]; //42-58
-int leds_ring_04[NUM_LEDS_RING_04]; //59-72
-int leds_ring_05[NUM_LEDS_RING_05];  //73-77
+int leds_ring_02[NUM_LEDS_RING_02]; //22-41 //42
+int leds_ring_03[NUM_LEDS_RING_03]; //42-58 //44-60
+int leds_ring_04[NUM_LEDS_RING_04]; //59-72 //61-74
+int leds_ring_05[NUM_LEDS_RING_05];  //75-77
 
 int *led_rings[NUM_LEDS_RINGS]{ leds_ring_01,leds_ring_02,leds_ring_03,leds_ring_04,leds_ring_05 };
 int led_ring_counts[NUM_LEDS_RINGS]{ NUM_LEDS_RING_01, NUM_LEDS_RING_02,NUM_LEDS_RING_03, NUM_LEDS_RING_04, NUM_LEDS_RING_05};
@@ -100,74 +100,96 @@ void setupLedRingArrays() {
 void loop() {
 
     //enter the demo loop...
-    singleDotCrawl();
+    demoLoop1();
 
-    lightRingCrawl();
-
-    lightColumnCrawl();
-    lightColumnCrawl();
 }
 
-void singleDotCrawl() 
+void demoLoop1() {
+
+    for (int i = 10; i > 0; i=i-1)
+    {
+        singleDotCrawl(1, i);
+    }
+
+    for (int i = 801; i > 0; i=i-50)
+    {
+        lightRingCrawl(1, i);
+    }
+
+    for (int i = 20; i > 0; i= i-1)
+    {
+        lightColumnCrawl(1, i);
+    }
+}
+
+//#####################################################################################
+
+#pragma region LED Program Code
+
+//############################################################################################
+
+void singleDotCrawl(int loops, int delayms) 
 {
+    if (delayms < 1) delayms = 1;
     FastLED.setBrightness(150);
-    for (int x = 0; x < NUM_LEDS; x++)
+    for (size_t z = 0; z < loops; z++)
     {
-        for (int i = 0; i < NUM_LEDS; i++) 
+        for (int x = 0; x < NUM_LEDS; x++)
         {
-            leds[i].setRGB(0, 0, 0);
-        }
-        
-        //leds[x] += CRGB::White;
+            clearLEDs();
 
-        leds[x].setRGB(100, 100, 100);
-        
-        FastLED.show();
-        delay(1);
+            leds[x].setRGB(100, 100, 100);
+
+            FastLED.show();
+            delay(delayms);
+        }
     }
 }
 
 
-void lightRingCrawl() {
-
-    for (int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
+void lightRingCrawl(int loops, int delayms) {
+    if (delayms < 5) delayms = 5;
+    for (size_t z = 0; z < loops; z++)
     {
-        //all black
-        for (int i = 0; i < NUM_LEDS; i++)
-        {
-            leds[i].setRGB(0, 0, 0);
-        }
-        //hit each ring if is modulus of the loop number
-        for (int a = 0; a < led_ring_counts[x]; a = a + 1) {
-            leds[led_rings[x][a]].setRGB(100, 100, 100);
-            int idebugger = 0;
-        }
-        FastLED.show();
-        delay(150);
-    }
-}
-
-void lightColumnCrawl() {
-
-    double threeSixty = 365;
-    //reset all the lights
-    for (double d = 0; d < 365; d = d +3)
-    {
-        clearLEDs();
         for (int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
         {
-            double thisRingCount = led_ring_counts[x];
-            double degreeConversionfactor = thisRingCount / threeSixty;
-            //hit LED in the ring that matches the degress
-            int indexOfLedToLight = degreeConversionfactor * d;
-            if (led_ring_counts[x] > indexOfLedToLight)
-            {
-                int stripIndex = led_rings[x][indexOfLedToLight];
-                leds[stripIndex].setRGB(100, 100, 100);
+            //all black
+            clearLEDs();
+            //hit each ring if is modulus of the loop number
+            for (int a = 0; a < led_ring_counts[x]; a = a + 1) {
+                leds[led_rings[x][a]].setRGB(100, 100, 100);
+                int idebugger = 0;
             }
+            FastLED.show();
+            delay(delayms);
         }
-        FastLED.show();
-        delay(1);
+    }
+}
+
+void lightColumnCrawl(int loops, int delayms) {
+    if (delayms < 1) delayms = 1;
+    double threeSixty = 365;
+    for (size_t z = 0; z < loops; z++)
+    {
+        for (double d = 0; d < 365; d = d + 3)
+        {
+            clearLEDs();
+            //Don't hit the top ring.  It is not a full ring.
+            for (int x = 0; x < NUM_LEDS_RINGS - 1; x = x + 1)
+            {
+                double thisRingCount = led_ring_counts[x];
+                double degreeConversionfactor = thisRingCount / threeSixty;
+                //hit LED in the ring that matches the degress
+                int indexOfLedToLight = degreeConversionfactor * d;
+                if (led_ring_counts[x] > indexOfLedToLight)
+                {
+                    int stripIndex = led_rings[x][indexOfLedToLight];
+                    leds[stripIndex].setRGB(100, 100, 100);
+                }
+            }
+            FastLED.show();
+            delay(delayms);
+        }
     }
 }
 
@@ -206,9 +228,6 @@ void BlinkRed(int count){
   }
 }
 
-#pragma region LED Program Code
-
-//############################################################################################
 //=======================================================================================
 // For gPatterns, list of patterns to cycle through.  Each is defined as a separate function below.
 #define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
