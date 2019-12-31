@@ -3,21 +3,29 @@
 // Read parameters from EEPROM or Serial
 void readCredentials()
 {
+
+    //Stack up the addresses based on the prior allocated spaces
     int ssidAddr = 0;
     int passAddr = ssidAddr + SSID_LEN;
-    int connectionStringAddr = passAddr + SSID_LEN;
+    int ado_connectionStringAddr = passAddr + PASS_LEN;
+    int ado_apiaccesstokenStringAddr = ado_connectionStringAddr + ADO_CONNECTION_STRING_LEN;
+    int iot_connectionStringAddr = ado_apiaccesstokenStringAddr + ADO_API_KEY_LEN;
 
     // malloc for parameters
     ssid = (char *)malloc(SSID_LEN);
     pass = (char *)malloc(PASS_LEN);
-    connectionString = (char *)malloc(CONNECTION_STRING_LEN);
+    ado_connectionString = (char *)malloc(ADO_CONNECTION_STRING_LEN);
+    ado_apiaccesstokenString = (char*)malloc(ADO_API_KEY_LEN);
+    //iot_connectionString = (char*)malloc(IOT_CONNECTION_STRING_LEN);
 
     // try to read out the credential information, if failed, the length should be 0.
     int ssidLength = EEPROMread(ssidAddr, ssid);
     int passLength = EEPROMread(passAddr, pass);
-    int connectionStringLength = EEPROMread(connectionStringAddr, connectionString);
+    int ado_connectionStringLength = EEPROMread(ado_connectionStringAddr, ado_connectionString);
+    int ado_apiaccesstokenStringLength = EEPROMread(ado_apiaccesstokenStringAddr, ado_apiaccesstokenString);
+    //int iot_connectionStringLength = EEPROMread(iot_connectionStringAddr, iot_connectionString);
 
-    if (ssidLength > 0 && passLength > 0 && connectionStringLength > 0 && !needEraseEEPROM())
+    if (ssidLength > 0 && passLength > 0 && ado_connectionStringLength > 0 && !needEraseEEPROM())
     {
         return;
     }
@@ -29,8 +37,14 @@ void readCredentials()
     readFromSerial("Input your Wi-Fi password: ", pass, PASS_LEN, 0);
     EEPROMWrite(passAddr, pass, strlen(pass));
 
-    readFromSerial("Input your Azure IoT hub device connection string: ", connectionString, CONNECTION_STRING_LEN, 0);
-    EEPROMWrite(connectionStringAddr, connectionString, strlen(connectionString));
+    readFromSerial("Input your Azure DevOps PullRequest path string: ", ado_connectionString, ADO_CONNECTION_STRING_LEN, 0);
+    EEPROMWrite(ado_connectionStringAddr, ado_connectionString, strlen(ado_connectionString));
+
+    readFromSerial("Input your Azure DevOps API Access Token string: ", ado_apiaccesstokenString, ADO_API_KEY_LEN, 0);
+    EEPROMWrite(ado_apiaccesstokenStringAddr, ado_apiaccesstokenString, strlen(ado_apiaccesstokenString));
+
+    //readFromSerial("Input your Azure IoT hub device connection string: ", iot_connectionString, IOT_CONNECTION_STRING_LEN, 0);
+    //EEPROMWrite(iot_connectionStringAddr, iot_connectionString, strlen(iot_connectionString));
 }
 
 bool needEraseEEPROM()

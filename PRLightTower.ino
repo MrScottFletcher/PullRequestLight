@@ -12,6 +12,7 @@
 
 //This project needs the FastLED library - link in the description.
 #include "FastLED.h"
+#include "PRLightTower.h"
 
 //The total number of LEDs being used is 77
 #define NUM_LEDS 77
@@ -27,7 +28,9 @@
 #define FRAMES_PER_SECOND 100
 #define SECONDS_BETWEEN_PATTERN 20
 
-static char *connectionString;
+static char *iot_connectionString;
+static char* ado_connectionString;
+static char* ado_apiaccesstokenString;
 static char *ssid;
 static char *pass;
 
@@ -79,7 +82,23 @@ void setup() {
   
   setupLedRingArrays();
   BlinkRed(2);
+
+  readCredentials();
  
+  setupWifi();
+}
+
+void setupWifi() {
+
+    //glow first ring
+    //test the wifi 
+    //If OK, show Green, otherwise, show red
+    
+    //test the connection to ADO
+    //If OK, show Green, otherwise, show red
+
+    //If all OK, flassh all Green twice, and return to enter the status loop as usual;
+    //If all NOT ok, stay here and slow pulse red on top only
 }
 
 void setupLedRingArrays() {
@@ -106,20 +125,47 @@ void loop() {
 
 void demoLoop1() {
 
+    //60 frames a second
+    int framesPerSecond = 20;
+    int msDelay = 1000 / framesPerSecond;
+    int desiredDurationSeconds = 60;
+    int loops = 1000/msDelay * desiredDurationSeconds;
+
+    //FireRings(loops, msDelay);
+
+    for (int i = 401; i > 0; i = i - 50)
+    {
+        lightRingStackColors(1, i);
+    }
+    //fast
+    lightRingStackColors(50, 100);
+
     for (int i = 10; i > 0; i=i-1)
     {
         singleDotCrawl(1, i);
     }
+    singleDotCrawl(100, 1);
+
+    for (int i = 20; i > 0; i = i - 1)
+    {
+        lightMultiColumnCrawl(1, i);
+    }
+    //fast
+    lightMultiColumnCrawl(25, 1);
 
     for (int i = 801; i > 0; i=i-50)
     {
         lightRingCrawl(1, i);
     }
+    //fast
+    lightRingCrawl(100, 100);
 
-    for (int i = 20; i > 0; i= i-1)
+
+    for (int i = 20; i > 0; i= i-2)
     {
         lightColumnCrawl(1, i);
     }
+    lightColumnCrawl(25, 1);
 }
 
 //#####################################################################################
@@ -156,39 +202,122 @@ void lightRingCrawl(int loops, int delayms) {
             //all black
             clearLEDs();
             //hit each ring if is modulus of the loop number
-            for (int a = 0; a < led_ring_counts[x]; a = a + 1) {
-                leds[led_rings[x][a]].setRGB(100, 100, 100);
-                int idebugger = 0;
-            }
+            illuminateRing(x, 100, 100, 100);
             FastLED.show();
             delay(delayms);
         }
     }
 }
 
+void lightRingStackColors(int loops, int delayms) {
+    FastLED.setBrightness(150);
+    if (delayms < 5) delayms = 5;
+    for (size_t z = 0; z < loops; z++)
+    {
+        int brightness = 200;
+        int r = 0;
+        int g = 0; 
+        int b = 0;
+
+        //all black
+        clearLEDs();
+        for (int x = 0; x < NUM_LEDS_RINGS; x = x + 1)
+        {
+            if (x == 0) {
+                r = brightness;
+                g = 0;
+                b = 0;
+            }
+            if (x == 1) {
+                r = 0;
+                g = brightness;
+                b = 0;
+            }
+            else if (x == 2) {
+                r = 0;
+                g = 0;
+                b = brightness;
+            }
+            else if (x == 3) {
+                r = 0;
+                g = brightness / 2;
+                b = brightness / 2;
+            }
+            else if (x == 4) {
+                r = brightness / 2;
+                g = brightness / 2;
+                b = 0;
+            }
+            else if (x == 5) {
+                r = brightness / 2;
+                g = 0;
+                b = brightness / 2;
+            }
+            illuminateRing(x, r, g, b);
+            FastLED.show();
+            delay(delayms);
+        }
+    }
+}
+
+void illuminateRing(int ringIndex, int r, int g, int b) {
+    if (ringIndex < 0)
+        ringIndex = 0;
+
+    for (int a = 0; a < led_ring_counts[ringIndex]; a = a + 1) {
+        leds[led_rings[ringIndex][a]].setRGB(r,g,b);
+    }
+}
+
 void lightColumnCrawl(int loops, int delayms) {
     if (delayms < 1) delayms = 1;
-    double threeSixty = 365;
+    
     for (size_t z = 0; z < loops; z++)
     {
         for (double d = 0; d < 365; d = d + 3)
         {
             clearLEDs();
             //Don't hit the top ring.  It is not a full ring.
-            for (int x = 0; x < NUM_LEDS_RINGS - 1; x = x + 1)
-            {
-                double thisRingCount = led_ring_counts[x];
-                double degreeConversionfactor = thisRingCount / threeSixty;
-                //hit LED in the ring that matches the degress
-                int indexOfLedToLight = degreeConversionfactor * d;
-                if (led_ring_counts[x] > indexOfLedToLight)
-                {
-                    int stripIndex = led_rings[x][indexOfLedToLight];
-                    leds[stripIndex].setRGB(100, 100, 100);
-                }
-            }
+            IlluminateAllRingsAtDegree(d);
             FastLED.show();
             delay(delayms);
+        }
+    }
+}
+
+void lightMultiColumnCrawl(int loops, int delayms) {
+    if (delayms < 1) delayms = 1;
+
+    for (size_t z = 0; z < loops; z++)
+    {
+        for (double d = 0; d < 365; d = d + 3)
+        {
+            clearLEDs();
+            //Don't hit the top ring.  It is not a full ring.
+            IlluminateAllRingsAtDegree(d);
+            IlluminateAllRingsAtDegree(d + 90);
+            IlluminateAllRingsAtDegree(d + 180);
+            IlluminateAllRingsAtDegree(d + 270);
+            FastLED.show();
+            delay(delayms);
+        }
+    }
+}
+
+
+void IlluminateAllRingsAtDegree(double d)
+{
+    static double threeSixty = 360;
+    for (int x = 0; x < NUM_LEDS_RINGS - 1; x = x + 1)
+    {
+        double thisRingCount = led_ring_counts[x];
+        double degreeConversionfactor = thisRingCount / threeSixty;
+        //hit LED in the ring that matches the degress
+        int indexOfLedToLight = degreeConversionfactor * ((int)d % 360);
+        if (led_ring_counts[x] > indexOfLedToLight)
+        {
+            int stripIndex = led_rings[x][indexOfLedToLight];
+            leds[stripIndex].setRGB(100, 100, 100);
         }
     }
 }
@@ -337,6 +466,7 @@ void juggle() {
 
 void Fire2012()
 {
+    //NOTE - requires caller to do FastLED.Show() and Delay();
 // Array of temperature readings at each simulation cell
   static byte heat[NUM_LEDS];
 
@@ -366,6 +496,48 @@ void Fire2012()
         pixelnumber = j;
       }
       leds[pixelnumber] = color;
+    }
+}
+
+
+void FireRings(int loops, int delayms)
+{
+    // Array of temperature readings at each simulation cell
+    static byte heat[NUM_LEDS_RINGS];
+    if (delayms < 1) delayms = 1;
+    for (size_t z = 0; z < loops; z++)
+    {
+        // Step 1.  Cool down every cell a little
+        for (int i = 0; i < NUM_LEDS_RINGS; i++) {
+            heat[i] = qsub8(heat[i], random8(0, ((COOLING * 10) / NUM_LEDS_RINGS) + 2));
+        }
+
+        // Step 2.  Heat from each cell drifts 'up' and diffuses a little
+        for (int k = NUM_LEDS_RINGS - 1; k >= 2; k--) {
+            heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2]) / 3;
+        }
+
+        // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
+        if (random8() < SPARKING) {
+            int y = random8(7);
+            heat[y] = qadd8(heat[y], random8(160, 255));
+        }
+
+        int currentLedStripIndex = 0;
+        // Step 4.  Map from heat cells to LED colors
+        for (int j = 0; j < NUM_LEDS_RINGS; j++)
+        {
+            CRGB color1 = HeatColor(heat[j]);
+            double thisRingCount = led_ring_counts[j];
+            //hit LED in the ring that matches the degress
+            for (int i = 0; i < thisRingCount; i++)
+            {
+                leds[currentLedStripIndex] = color1;
+                currentLedStripIndex++;
+            }
+        }
+        FastLED.show();
+        delay(delayms);
     }
 }
 

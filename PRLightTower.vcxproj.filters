@@ -36,5 +36,8 @@
     <ClInclude Include="config.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="PRLightTower.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

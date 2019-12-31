@@ -30,6 +30,8 @@
 // http://serverfault.com/a/45509
 #define SSID_LEN 32
 #define PASS_LEN 32
-#define CONNECTION_STRING_LEN 256
-
+#define IOT_CONNECTION_STRING_LEN 256
+#define ADO_CONNECTION_STRING_LEN 256
+#define ADO_API_KEY_LEN 256
+ 
 #define MESSAGE_MAX_LEN 256

@@ -111,6 +111,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
+    <ClInclude Include="PRLightTower.h" />
     <ClInclude Include="__vm\.PRLightTower.vsarduino.h" />
   </ItemGroup>
   <PropertyGroup>
