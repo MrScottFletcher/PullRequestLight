@@ -26,7 +26,7 @@
 // EEPROM address configuration
 #define EEPROM_SIZE 512
 
-// SSID and SSID password's length should < 32 bytes
+// SSID < 32, and SSID password's length should be < 64 bytes
 // http://serverfault.com/a/45509
 #define SSID_LEN 32
 #define PASS_LEN 32

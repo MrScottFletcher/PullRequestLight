@@ -1,12 +1,14 @@
 #include <ArduinoJson.hpp>
 #include <ArduinoJson.h>
-#include <Arduino_JSON.h>
+//#include <Arduino_JSON.h>
 #include <TimeLib.h>
 #include <Time.h>
 #include <Adafruit_NeoPixel.h>
 #include <ESP8266WiFi.h>
+#include "ESP8266HTTPClient.h"
 #include <WiFiClientSecure.h>
 #include <WiFiUdp.h>
+#include <base64.h>
 
 #include "config.h"
 
@@ -14,6 +16,18 @@
 #include "FastLED.h"
 #include "PRLightTower.h"
 
+static char *iot_connectionString;
+static char* ado_connectionString;
+static char* ado_apiaccesstokenString;
+static char *ssid;
+static char *pass;
+
+static WiFiClientSecure sslClient; // for ESP8266
+const char* UserAgent = "PullRequestLight/1.0 (Arduino ESP8266)";
+
+#pragma region LED variables setup
+//###############################################
+bool gReverseDirection = false;
 //The total number of LEDs being used is 77
 #define NUM_LEDS 77
 
@@ -27,16 +41,6 @@
 #define BRIGHTNESS  10 //MAX 254
 #define FRAMES_PER_SECOND 100
 #define SECONDS_BETWEEN_PATTERN 20
-
-static char *iot_connectionString;
-static char* ado_connectionString;
-static char* ado_apiaccesstokenString;
-static char *ssid;
-static char *pass;
-
-#pragma region LED variables setup
-//###############################################
-bool gReverseDirection = false;
 
 //Initialise the LED array, the LED Hue (ledh) array, and the LED Brightness (ledb) array.
 CRGB leds[NUM_LEDS];
@@ -81,24 +85,349 @@ void setup() {
   FastLED.setBrightness( BRIGHTNESS );
   
   setupLedRingArrays();
+  delay(500);
   BlinkRed(2);
-
-  readCredentials();
- 
-  setupWifi();
+  
+  fullSetupLightsAndWiFi();
+  
+  testParsing();
 }
 
-void setupWifi() {
+void loop() {
 
-    //glow first ring
-    //test the wifi 
-    //If OK, show Green, otherwise, show red
+    //enter the demo loop...
+    demoLoop1();
+
+}
+
+void testParsing() {
     
-    //test the connection to ADO
-    //If OK, show Green, otherwise, show red
+    FastLED.setBrightness(200);
+    //-------------------------------------
+    //SERIAL
+    //-------------------------------------
+    illuminateRing(0, 0, 100, 100);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
 
-    //If all OK, flassh all Green twice, and return to enter the status loop as usual;
-    //If all NOT ok, stay here and slow pulse red on top only
+    //const size_t capacity = 4790; //from a sample
+    const size_t capacity = 9216; //(9K)
+    //const size_t capacity = 102400; //does not work
+   
+    //Serial.printf("Allocating doc.\r\n");
+    DynamicJsonDocument doc(capacity);
+    String Link;
+    HTTPClient http;    //Declare object of class HTTPClient
+    
+    //"C:\Program Files\Git\usr\bin\openssl.exe" s_client -connect rlicorp.visualstudio.com:443 | "C:\Program Files\Git\usr\bin\openssl.exe" x509 -fingerprint -noout
+    //SHA1 Fingerprint=79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3
+    const char* fingerprint = "79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3";
+    
+    //Serial.printf("Encoding API Key...\r\n");
+    sslClient.setInsecure();
+    
+    //Serial.printf("Adding headers...\r\n");
+    http.setAuthorization(ado_apiaccesstokenString, ado_apiaccesstokenString);
+
+    http.setUserAgent(UserAgent);
+    
+    
+    //GET Data
+    //The link to Marine
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/Marine/_apis/git/pullrequests?api-version=5.0";
+    //Tests ALL Pull Requests in org.
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0";
+    Link = ado_connectionString;
+
+    Serial.printf("HTTP Begin...\r\n");
+    http.begin(Link, fingerprint);     //Specify request destination
+
+    //Serial.printf("HTTP GET...\r\n");
+    int httpCode = http.GET();            //Send the request
+    //Serial.printf("END GET...\r\n");
+    Serial.println(httpCode);   //Print HTTP return code
+
+    //// HTTP client errors
+    //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
+    //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
+    //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
+    //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
+    //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
+    //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
+    //#define HTTPC_ERROR_NO_STREAM           (-6)
+    //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
+    //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
+    //#define HTTPC_ERROR_ENCODING            (-9)
+    //#define HTTPC_ERROR_STREAM_WRITE        (-10)
+    //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
+
+    illuminateRing(0, 0, 0, 0);
+    illuminateRing(1, 0, 0, 0);
+    illuminateRing(2, 0, 0, 0);
+    illuminateRing(3, 0, 0, 0);
+
+    //if (httpCode > 0) { //Check the returning code
+    //    if (httpCode == 200) {
+    //        //WAS 200!!   Yeah!! - SLOW GREEN
+    //        for (size_t i = 0; i < 5; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Green
+    //                illuminateRing(4, 0, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(600);
+    //        }
+    //    }
+    //    else {
+    //        //not 200 - FAST YELLOW
+    //        for (size_t i = 0; i < 100; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Yellow
+    //                illuminateRing(4, 250, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(100);
+    //        }
+    //    }
+    //}
+    //else {
+    //    for (size_t i = 0; i < 100; i++)
+    //    {
+    //        //MEDIUM RED
+    //        if (i % 2 == 0) {
+    //            illuminateRing(4, 250, 0, 0);
+    //        }
+    //        else {
+    //            illuminateRing(4, 0, 0, 0);
+    //        }
+    //    FastLED.show();
+    //    delay(300);
+    //    }
+    //}
+    //delay(10000);
+
+    Serial.printf("HTTP getString()...\r\n");
+    String payload = http.getString();    //Get the response payload
+    Serial.println(payload);    //Print request response payload
+
+    Serial.printf("HTTP end()...\r\n");
+    http.end();  //Close connection
+
+    //===================================================================
+
+    Serial.printf("Deserializing payload now...\r\n");
+    DeserializationError error = deserializeJson(doc, payload);
+
+    Serial.printf("Deserializing COMPLETE...\r\n");
+
+    Serial.printf("Checking error object...\r\n");
+    if (error) 
+    {
+        Serial.printf("ERROR parsing json.\r\n");
+
+        String err = String(error.c_str());
+        //could be IncompleteInput - payload too long
+        Serial.println(err);
+        for (size_t i = 0; i < 10; i++)
+        {
+            if (i % 2 == 0)
+                FastLED.showColor(CRGB::Chartreuse);
+            if (i % 3 == 0)
+                FastLED.showColor(CRGB::DarkRed);
+            else
+                FastLED.showColor(CRGB::Honeydew);
+
+            delay(1000);
+        }
+        return;
+    }
+
+    Serial.printf("Past the parsing checks...\r\n");
+    FastLED.showColor(CRGB::Green);
+    FastLED.show();
+    delay(5000);
+    
+    clearLEDs();
+    FastLED.show();
+
+    illuminateRing(4, 0, 0, 250);
+    FastLED.show();
+    delay(1000);
+
+    Serial.printf("Getting Count...\r\n");
+    int count = doc["count"]; 
+    Serial.printf("trying to show the count...\r\n");
+    Serial.printf("Found PRs in json: %d ", count);
+    Serial.printf("---------------\r\n");
+    Serial.printf("\r\n");
+
+    if (count > 0) {
+        Serial.printf("Setting glitter...\r\n");
+        rainbowWithGlitter();
+        FastLED.show();
+        delay(5000);
+    }
+    else {
+        illuminateRing(1, 250, 250, 0);
+        illuminateRing(2, 250, 250, 0);
+        illuminateRing(3, 250, 250, 0);
+        illuminateRing(4, 250, 250, 0);
+        FastLED.show();
+    }
+
+
+    illuminateRing(4, 0, 250, 0);
+    FastLED.show();
+    delay(1000);
+
+    illuminateRing(0, 0, 200, 0);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
+
+    Serial.printf("End of test.\r\n");
+
+}
+
+
+
+void GetPRStatus() {
+
+    //View just Marine
+    //https://rlicorp.visualstudio.com/Marine/_apis/git/pullrequests?api-version=5.0
+    
+    //For ALL Pull Requests:
+    //name":"Marine",
+    //GET https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0
+
+    //GET https://dev.azure.com/{organization}/{project}/_apis/git/pullrequests?searchCriteria.includeLinks={searchCriteria.includeLinks}&searchCriteria.sourceRefName={searchCriteria.sourceRefName}&searchCriteria.sourceRepositoryId={searchCriteria.sourceRepositoryId}&searchCriteria.targetRefName={searchCriteria.targetRefName}&searchCriteria.status={searchCriteria.status}&searchCriteria.reviewerId={searchCriteria.reviewerId}&searchCriteria.creatorId={searchCriteria.creatorId}&searchCriteria.repositoryId={searchCriteria.repositoryId}&maxCommentLength={maxCommentLength}&$skip={$skip}&$top={$top}&api-version=5.0
+
+
+    HTTPClient http;
+    http.begin("https://calm-falls-41696.herokuapp.com/api/v1/cards");
+    http.addHeader("Content-Type", "application/json");
+    int httpCode = http.GET();
+    Serial.println(httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+        Serial.print("HTTP response code ");
+        Serial.println(httpCode);
+        String response = http.getString();
+        Serial.println(response);
+    }
+    http.end();
+
+
+}
+
+//##########################################################################################################
+
+#pragma region SETUP LIGHTS, RINGS, WIFI, TIME SECTION
+
+
+void fullSetupLightsAndWiFi() {
+    FastLED.setBrightness(150);
+    //-------------------------------------
+    //SERIAL
+    //-------------------------------------
+    illuminateRing(0, 0, 0, 100);
+    FastLED.show();
+
+    initSerial();
+
+    illuminateRing(0, 0, 100, 0);
+    FastLED.show();
+
+    delay(300);
+    BlinkRed(1);
+    //-------------------------------------
+    //CREDENTIALS
+    //-------------------------------------
+    illuminateRing(1, 0, 0, 100);
+    FastLED.show();
+
+    readCredentials();
+
+    illuminateRing(1, 0, 100, 0);
+    FastLED.show();
+    //-------------------------------------
+    //BREATHE a moment before the WiFi setup
+    delay(300);
+    BlinkRed(1);
+    //-------------------------------------
+    //WIFI NETWORK   
+    //-------------------------------------
+    illuminateRing(2, 0, 0, 100);
+    FastLED.show();
+
+    bool bConnected = setupWifi();
+
+    //Initialize the Time routine
+    illuminateRing(2, 0, 0, 100);
+    FastLED.show();
+
+    if (bConnected) {
+
+        //-------------------------------------
+        //TIME
+        //-------------------------------------
+        illuminateRing(3, 0, 0, 100);
+        FastLED.show();
+
+        initTime();
+
+        illuminateRing(3, 0, 100, 0);
+        FastLED.show();
+
+        delay(1000);
+        BlinkRed(1);
+        //==============================================
+        clearLEDs();
+        FastLED.show();
+
+        delay(300);
+        BlinkRed(1);
+        //-------------------------------------
+    }
+    else {
+        //bail out to some other mode
+    }
+    //do we really want to continue if not connected?
+}
+
+bool setupWifi() {
+    //Initialize the WIFI
+    illuminateRing(3, 0, 0, 100);
+    FastLED.show();
+
+    bool connected = initWifi();
+    if (connected)
+    {
+        illuminateRing(3, 0, 100, 0);
+        FastLED.show();
+        delay(2000);
+    }
+    else
+    {
+        for (size_t i = 0; i < 10; i++)
+        {
+            if (i % 2 == 0)
+                FastLED.showColor(CRGB::DarkRed);
+            else
+                FastLED.showColor(CRGB::Yellow);
+
+            delay(1000);
+        }
+    }
+    return connected;
 }
 
 void setupLedRingArrays() {
@@ -115,13 +444,88 @@ void setupLedRingArrays() {
     }
 }
 
+bool initWifi()
+{
+    int maxLoopCheckCount = 3;
+    int eachLoopCheckWaitSeconds = 10;
 
-void loop() {
 
-    //enter the demo loop...
-    demoLoop1();
+    bool bConnected = false;
+    // Attempt to connect to Wifi network:
+    Serial.printf("Attempting to connect to SSID: %s.\r\n", ssid);
 
+    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
+    WiFi.begin(ssid, pass);
+    int loopCounter = 0;
+    while (WiFi.status() != WL_CONNECTED && loopCounter < maxLoopCheckCount)
+    {
+        // Get Mac Address and show it.
+        // WiFi.macAddress(mac) save the mac address into a six length array, but the endian may be different. The huzzah board should
+        // start from mac[0] to mac[5], but some other kinds of board run in the oppsite direction.
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        Serial.printf("You device with MAC address %02x:%02x:%02x:%02x:%02x:%02x connects to %s failed! Waiting 10 seconds to retry.\r\n",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], ssid);
+        WiFi.begin(ssid, pass);
+        delay(eachLoopCheckWaitSeconds * 1000);
+        loopCounter++;
+    }
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.printf("Connected to wifi %s.\r\n", ssid);
+        bConnected = true;
+    }
+    else {
+        Serial.printf("WIFI CONNECTION FAILED!");
+    }
+
+    return bConnected;
 }
+
+
+void initTime()
+{
+    time_t epochTime;
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    while (true)
+    {
+        epochTime = time(NULL);
+
+        if (epochTime == 0)
+        {
+            Serial.println("Fetching NTP epoch time failed! Waiting 2 seconds to retry.");
+            delay(2000);
+        }
+        else
+        {
+            Serial.printf("Fetched NTP epoch time is: %lu.\r\n", epochTime);
+            break;
+        }
+    }
+}
+
+#pragma endregion
+
+//##########################################################################################################
+
+void fadeIn(uint8_t wait) {
+
+    for (uint8_t b = 0; b < 255; b++) {
+        FastLED.showColor(CRGB::White, b);
+        delay(wait);
+    };
+};
+
+void fadeOut(uint8_t wait)
+{
+    for (uint8_t b = 255; b > 0; b--) {
+        FastLED.showColor(CRGB::White, b);
+        delay(wait);
+    };
+}
+
+//##########################################################################################################
 
 void demoLoop1() {
 
