@@ -212,7 +212,7 @@ void loop() {
     
     //This "et" will not be updated until the above if triggers.  This is kind of a hot mess.
     //Byproduct of polk-and-prod experiemntation...
-        if (lastTimeCheck + pollingCheckIntervalSeconds < et) {
+    if (lastTimeCheck + pollingCheckIntervalSeconds < et) {
         lastTimeCheck = et;
         //Illinois is GMT-6, so "0" == 6PM.  "12" is 6AM.
         bool in_activeTime = (t->tm_hour > 12);
@@ -229,7 +229,7 @@ void loop() {
             FastLED.setBrightness(0);
             FastLED.show();
             //hold for a bit since we're - like two minutes
-            delay(120000);
+            delay(240000);
         }
     }
     else {
