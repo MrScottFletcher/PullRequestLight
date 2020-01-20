@@ -25,6 +25,13 @@ static char *pass;
 static WiFiClientSecure sslClient; // for ESP8266
 const char* UserAgent = "PullRequestLight/1.0 (Arduino ESP8266)";
 
+time_t lastTimeCheck;
+int lastPrCount;
+
+int pollingCheckIntervalSeconds;
+
+//=================================================================
+
 #pragma region LED variables setup
 //###############################################
 bool gReverseDirection = false;
@@ -38,8 +45,7 @@ bool gReverseDirection = false;
 
 #define CHIPSET     WS2811
 
-#define BRIGHTNESS  10 //MAX 254
-#define FRAMES_PER_SECOND 100
+#define MAIN_LOOP_SPEED_1_to_1000 100 //Higher is faster.  Inserts a ms delay of "1000/MAIN_LOOP_SPEED_1_to_1000"
 #define SECONDS_BETWEEN_PATTERN 20
 
 //Initialise the LED array, the LED Hue (ledh) array, and the LED Brightness (ledb) array.
@@ -50,9 +56,11 @@ typedef void (*SimplePatternList[])();
 //SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle, bpm };
 SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle};
 
+typedef void (*DisplayPatternFunction)(void);
 
 uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
+uint8_t BRIGHTNESS = 10; //MAX 254
 
 #define NUM_LEDS_RINGS 5
 
@@ -71,9 +79,93 @@ int leds_ring_05[NUM_LEDS_RING_05];  //75-77
 int *led_rings[NUM_LEDS_RINGS]{ leds_ring_01,leds_ring_02,leds_ring_03,leds_ring_04,leds_ring_05 };
 int led_ring_counts[NUM_LEDS_RINGS]{ NUM_LEDS_RING_01, NUM_LEDS_RING_02,NUM_LEDS_RING_03, NUM_LEDS_RING_04, NUM_LEDS_RING_05};
 
+
 //###############################################
 
 #pragma endregion
+
+//=================================================================
+
+#pragma region Display States and Manager Code
+
+enum DisplayModeEnum {
+    Weather_RainStarting,
+    Weather_SnowStarting,
+    Weather_SevereWeather_ALERT,
+    PullRequest_Pending,
+};
+
+class DisplayState {
+    time_t startTime;
+    //zero means continuous until removed
+    time_t scheduledEndTime;
+    String StateName;
+    DisplayModeEnum DisplayMode;
+    DisplayPatternFunction Pattern;
+};
+
+
+class DisplayStateManager {
+    DisplayState* States[3];
+
+    DisplayState currentDisplayState;
+    time_t currentDisplayStateStarted;
+    int currentDisplayStateIndex;
+
+public:
+    DisplayState getNextDisplayState() {
+        return *States[0];
+    }
+
+public:
+    void removeDisplayState_byMode(DisplayModeEnum mode) {
+
+        //Find the mode in the list
+
+        //if active, move currentDisplayState to the next
+
+        //remove it from our display states list
+    }
+
+public:
+    void addDisplayState_byMode(DisplayModeEnum mode, int longevityInSeconds) {
+
+        //Find the mode in the list.
+
+        //if found, update its longevity from now - zero is forever
+
+        //If not in the list, add it
+    }
+
+
+};
+
+DisplayStateManager CurrentStates;
+
+#pragma endregion
+
+//=================================================================
+#pragma region CONFIRGURE PATTERNS FOR CONDITIONS
+
+//DisplayPatternFunction getDisplayPattern(DisplayModeEnum mode) {
+//    switch (mode) {
+//    case Weather_RainStarting:
+//        return rainbow;
+//        break;
+//    case Weather_SnowStarting:
+//        return rainbowWithGlitter;
+//        break;
+//    default:
+//        return confetti;
+//        break;
+//    }
+//}
+
+#pragma endregion
+
+//=================================================================
+//              SETUP AND LOOP
+//=================================================================
 
 void setup() {
   delay(3000); // sanity delay
@@ -84,254 +176,189 @@ void setup() {
   FastLED.addLeds<CHIPSET, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
   FastLED.setBrightness( BRIGHTNESS );
   
+  pollingCheckIntervalSeconds = 60;
+
   setupLedRingArrays();
   delay(500);
   BlinkRed(2);
   
   fullSetupLightsAndWiFi();
+
   
-  testParsing();
+  lastTimeCheck = GetTime();
+  
+  //testParsing();
 }
 
 void loop() {
 
+    //each loop will be a couple of minutes.  We don't want to bang on the time server
+    //every few millis, so let's only do that every so often.
+
+    static int loopCount = 0;
+    
     //enter the demo loop...
-    demoLoop1();
+    //demoLoop1();
+    bool in_activeTime;
+    time_t et;
+
+    //?We're going to this every loop, but we might throttle later.
+    if (loopCount == 0 || loopCount % 10 == 0) {
+        et = GetTime();
+        Serial.printf("Fetched NTP epoch time is: %lu.\r\n", et);
+    }
+    
+    tm* t = gmtime(&et);
+    
+    //This "et" will not be updated until the above if triggers.  This is kind of a hot mess.
+    //Byproduct of polk-and-prod experiemntation...
+        if (lastTimeCheck + pollingCheckIntervalSeconds < et) {
+        lastTimeCheck = et;
+        //Illinois is GMT-6, so "0" == 6PM.  "12" is 6AM.
+        bool in_activeTime = (t->tm_hour > 12);
+        //bool in_activeTime = true;
+
+        if (in_activeTime) {
+            in_activeTime = true;
+            UpdatePrCounts();
+        }
+        else
+        {
+            Serial.printf("Pausing because HOUR is: %d.\r\n", t->tm_hour);
+            //Shut all the lights off
+            FastLED.setBrightness(0);
+            FastLED.show();
+            //hold for a bit since we're - like two minutes
+            delay(120000);
+        }
+    }
+    else {
+        Serial.println("Pausing a bit because Poll time has not triggered");
+        delay(2000);
+    }
+
+    //****************************************************
+    //If we want to handle the FastLED like the samples, we would alter the
+    //speed and pallette, and do the Show() call here.  Need to research the 
+    //polling intervals differently, though.
+    //****************************************************
+
+    loopCount++;
+}
+
+//void doLEDLoop() {
+//    //This might become the managed loop
+//    FastLED.show();
+//    FastLED.delay(1000/MAIN_LOOP_SPEED_1_to_1000);
+//}
+
+//=================================================================
+
+#pragma region PULL REQUEST POLL AND COUNT CODE
+
+void UpdatePrCounts() {
+    int prCount = getPrCount();
+    //compare the states, do the things.
+    ChangeStates_PrCount(prCount);
+}
+
+void ChangeStates_PrCount(int newPrCount) {
+
+    if (newPrCount > 0) {
+        for (size_t i = 0; i < 7; i++)
+        {
+            fadeIn(CRGB::Blue, 100, 75);
+            fadeOut(CRGB::Blue, 100, 75);
+        }
+    }
+    //This is the smarter State Change version...
+    //static int lastPrCount = 0;
+    //if (newPrCount != lastPrCount) {
+    //    //changed
+    //    if (newPrCount > 0) {
+    //        //set to on
+    //        CurrentStates.addDisplayState_byMode(PullRequest_Pending, 0);
+    //    }
+    //    else {
+    //        //set to off
+    //        CurrentStates.removeDisplayState_byMode(PullRequest_Pending);
+    //    }
+    //}
 
 }
 
-void testParsing() {
-    
-    FastLED.setBrightness(200);
-    //-------------------------------------
-    //SERIAL
-    //-------------------------------------
-    illuminateRing(0, 0, 100, 100);
-    FastLED.show();
-    delay(300);
-    BlinkRed(1);
-
-    //const size_t capacity = 4790; //from a sample
+int getPrCount() {
     const size_t capacity = 9216; //(9K)
-    //const size_t capacity = 102400; //does not work
-   
-    //Serial.printf("Allocating doc.\r\n");
     DynamicJsonDocument doc(capacity);
     String Link;
     HTTPClient http;    //Declare object of class HTTPClient
-    
     //"C:\Program Files\Git\usr\bin\openssl.exe" s_client -connect rlicorp.visualstudio.com:443 | "C:\Program Files\Git\usr\bin\openssl.exe" x509 -fingerprint -noout
     //SHA1 Fingerprint=79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3
     const char* fingerprint = "79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3";
-    
-    //Serial.printf("Encoding API Key...\r\n");
+
     sslClient.setInsecure();
-    
-    //Serial.printf("Adding headers...\r\n");
     http.setAuthorization(ado_apiaccesstokenString, ado_apiaccesstokenString);
-
     http.setUserAgent(UserAgent);
-    
-    
-    //GET Data
-    //The link to Marine
-    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/Marine/_apis/git/pullrequests?api-version=5.0";
-    //Tests ALL Pull Requests in org.
-    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0";
     Link = ado_connectionString;
-
-    Serial.printf("HTTP Begin...\r\n");
     http.begin(Link, fingerprint);     //Specify request destination
-
-    //Serial.printf("HTTP GET...\r\n");
     int httpCode = http.GET();            //Send the request
-    //Serial.printf("END GET...\r\n");
     Serial.println(httpCode);   //Print HTTP return code
 
-    //// HTTP client errors
-    //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
-    //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
-    //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
-    //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
-    //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
-    //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
-    //#define HTTPC_ERROR_NO_STREAM           (-6)
-    //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
-    //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
-    //#define HTTPC_ERROR_ENCODING            (-9)
-    //#define HTTPC_ERROR_STREAM_WRITE        (-10)
-    //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
-
-    illuminateRing(0, 0, 0, 0);
-    illuminateRing(1, 0, 0, 0);
-    illuminateRing(2, 0, 0, 0);
-    illuminateRing(3, 0, 0, 0);
-
-    //if (httpCode > 0) { //Check the returning code
-    //    if (httpCode == 200) {
-    //        //WAS 200!!   Yeah!! - SLOW GREEN
-    //        for (size_t i = 0; i < 5; i++)
-    //        {
-    //            if (i % 2 == 0) {
-    //                //Green
-    //                illuminateRing(4, 0, 250, 0);
-    //            }
-    //            else {
-    //                illuminateRing(4, 0, 0, 0);
-    //            }
-    //            FastLED.show();
-    //            delay(600);
-    //        }
-    //    }
-    //    else {
-    //        //not 200 - FAST YELLOW
-    //        for (size_t i = 0; i < 100; i++)
-    //        {
-    //            if (i % 2 == 0) {
-    //                //Yellow
-    //                illuminateRing(4, 250, 250, 0);
-    //            }
-    //            else {
-    //                illuminateRing(4, 0, 0, 0);
-    //            }
-    //            FastLED.show();
-    //            delay(100);
-    //        }
-    //    }
-    //}
-    //else {
-    //    for (size_t i = 0; i < 100; i++)
-    //    {
-    //        //MEDIUM RED
-    //        if (i % 2 == 0) {
-    //            illuminateRing(4, 250, 0, 0);
-    //        }
-    //        else {
-    //            illuminateRing(4, 0, 0, 0);
-    //        }
-    //    FastLED.show();
-    //    delay(300);
-    //    }
-    //}
-    //delay(10000);
-
-    Serial.printf("HTTP getString()...\r\n");
-    String payload = http.getString();    //Get the response payload
-    Serial.println(payload);    //Print request response payload
-
-    Serial.printf("HTTP end()...\r\n");
-    http.end();  //Close connection
-
-    //===================================================================
-
-    Serial.printf("Deserializing payload now...\r\n");
-    DeserializationError error = deserializeJson(doc, payload);
-
-    Serial.printf("Deserializing COMPLETE...\r\n");
-
-    Serial.printf("Checking error object...\r\n");
-    if (error) 
-    {
-        Serial.printf("ERROR parsing json.\r\n");
-
-        String err = String(error.c_str());
-        //could be IncompleteInput - payload too long
-        Serial.println(err);
-        for (size_t i = 0; i < 10; i++)
+    if (httpCode != 200) {
+        for (size_t i = 0; i < 2; i++)
         {
-            if (i % 2 == 0)
-                FastLED.showColor(CRGB::Chartreuse);
-            if (i % 3 == 0)
-                FastLED.showColor(CRGB::DarkRed);
-            else
-                FastLED.showColor(CRGB::Honeydew);
-
-            delay(1000);
+            fadeIn(CRGB::Crimson, 20, 25);
+            fadeOut(CRGB::Crimson, 20, 25);
         }
-        return;
-    }
 
-    Serial.printf("Past the parsing checks...\r\n");
-    FastLED.showColor(CRGB::Green);
-    FastLED.show();
-    delay(5000);
-    
-    clearLEDs();
-    FastLED.show();
-
-    illuminateRing(4, 0, 0, 250);
-    FastLED.show();
-    delay(1000);
-
-    Serial.printf("Getting Count...\r\n");
-    int count = doc["count"]; 
-    Serial.printf("trying to show the count...\r\n");
-    Serial.printf("Found PRs in json: %d ", count);
-    Serial.printf("---------------\r\n");
-    Serial.printf("\r\n");
-
-    if (count > 0) {
-        Serial.printf("Setting glitter...\r\n");
-        rainbowWithGlitter();
-        FastLED.show();
-        delay(5000);
+        return -1;
     }
     else {
-        illuminateRing(1, 250, 250, 0);
-        illuminateRing(2, 250, 250, 0);
-        illuminateRing(3, 250, 250, 0);
-        illuminateRing(4, 250, 250, 0);
-        FastLED.show();
+
+#pragma region HTTP client errors
+        //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
+        //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
+        //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
+        //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
+        //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
+        //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
+        //#define HTTPC_ERROR_NO_STREAM           (-6)
+        //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
+        //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
+        //#define HTTPC_ERROR_ENCODING            (-9)
+        //#define HTTPC_ERROR_STREAM_WRITE        (-10)
+        //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
+#pragma endregion
+
+        String payload = http.getString();    //Get the response payload
+        http.end();  //Close connection
+        DeserializationError error = deserializeJson(doc, payload);
+        if (error)
+        {
+            String err = String(error.c_str());
+            Serial.println(err);
+            for (size_t i = 0; i < 2; i++)
+            {
+                fadeIn(CRGB::Yellow, 10, 25);
+                fadeOut(CRGB::Yellow, 10, 25);
+            }
+
+            return -1;
+        }
+
+        int count = doc["count"];
+
+        return count;
     }
-
-
-    illuminateRing(4, 0, 250, 0);
-    FastLED.show();
-    delay(1000);
-
-    illuminateRing(0, 0, 200, 0);
-    FastLED.show();
-    delay(300);
-    BlinkRed(1);
-
-    Serial.printf("End of test.\r\n");
-
 }
 
+#pragma endregion
 
-
-void GetPRStatus() {
-
-    //View just Marine
-    //https://rlicorp.visualstudio.com/Marine/_apis/git/pullrequests?api-version=5.0
-    
-    //For ALL Pull Requests:
-    //name":"Marine",
-    //GET https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0
-
-    //GET https://dev.azure.com/{organization}/{project}/_apis/git/pullrequests?searchCriteria.includeLinks={searchCriteria.includeLinks}&searchCriteria.sourceRefName={searchCriteria.sourceRefName}&searchCriteria.sourceRepositoryId={searchCriteria.sourceRepositoryId}&searchCriteria.targetRefName={searchCriteria.targetRefName}&searchCriteria.status={searchCriteria.status}&searchCriteria.reviewerId={searchCriteria.reviewerId}&searchCriteria.creatorId={searchCriteria.creatorId}&searchCriteria.repositoryId={searchCriteria.repositoryId}&maxCommentLength={maxCommentLength}&$skip={$skip}&$top={$top}&api-version=5.0
-
-
-    HTTPClient http;
-    http.begin("https://calm-falls-41696.herokuapp.com/api/v1/cards");
-    http.addHeader("Content-Type", "application/json");
-    int httpCode = http.GET();
-    Serial.println(httpCode);
-    if (httpCode == HTTP_CODE_OK) {
-        Serial.print("HTTP response code ");
-        Serial.println(httpCode);
-        String response = http.getString();
-        Serial.println(response);
-    }
-    http.end();
-
-
-}
+//=================================================================
 
 //##########################################################################################################
 
 #pragma region SETUP LIGHTS, RINGS, WIFI, TIME SECTION
-
 
 void fullSetupLightsAndWiFi() {
     FastLED.setBrightness(150);
@@ -505,23 +532,44 @@ void initTime()
     }
 }
 
+time_t GetTime() {
+    time_t epochTime;
+    while (true)
+    {
+        epochTime = time(NULL);
+
+        if (epochTime == 0)
+        {
+            Serial.println("Fetching NTP epoch time failed! Waiting 2 seconds to retry.");
+            delay(2000);
+        }
+        else
+        {
+            break;
+        }
+    }
+    return epochTime;
+}
 #pragma endregion
 
 //##########################################################################################################
 
-void fadeIn(uint8_t wait) {
+//i.e. CRGB::White
+void fadeIn(CRGB color, uint8_t loopDelayMs, uint8_t maxBrightness) {
 
     for (uint8_t b = 0; b < 255; b++) {
-        FastLED.showColor(CRGB::White, b);
-        delay(wait);
+        FastLED.showColor(color, b * maxBrightness / 255);
+        delay(loopDelayMs);
     };
 };
 
-void fadeOut(uint8_t wait)
+//fadeDurationMilliseconds
+//1000 / 
+void fadeOut(CRGB color, uint8_t loopDelayMs, uint8_t maxBrightness)
 {
     for (uint8_t b = 255; b > 0; b--) {
-        FastLED.showColor(CRGB::White, b);
-        delay(wait);
+        FastLED.showColor(color, b * maxBrightness / 255);
+        delay(loopDelayMs);
     };
 }
 
@@ -577,6 +625,21 @@ void demoLoop1() {
 #pragma region LED Program Code
 
 //############################################################################################
+
+void BlinkErrorStack(int changes, int delayMs) {
+    for (size_t i = 0; i < changes; i++)
+    {
+        if (i % 2 == 0)
+            FastLED.showColor(CRGB::Chartreuse);
+        if (i % 3 == 0)
+            FastLED.showColor(CRGB::DarkRed);
+        else
+            FastLED.showColor(CRGB::Honeydew);
+
+        delay(delayMs);
+    }
+}
+
 
 void singleDotCrawl(int loops, int delayms) 
 {
@@ -742,7 +805,7 @@ void demoLoop() {
         //Fire2012(); // run simulation frame
 
         FastLED.show(); // display this frame
-        FastLED.delay(1000 / FRAMES_PER_SECOND);
+        FastLED.delay(1000 / MAIN_LOOP_SPEED_1_to_1000);
 
         // for gPatterns, do some periodic updates
         EVERY_N_MILLISECONDS(20) { gHue++; } // slowly cycle the "base color" through the rainbow
@@ -945,6 +1008,208 @@ void FireRings(int loops, int delayms)
     }
 }
 
+#pragma endregion
+
+//#####################################################################################
+
+#pragma region TEST METHOD FOR TRYING STUFF
+
+void testParsing() {
+
+    FastLED.setBrightness(200);
+    //-------------------------------------
+    //SERIAL
+    //-------------------------------------
+    illuminateRing(0, 0, 100, 100);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
+
+    //const size_t capacity = 4790; //from a sample
+    const size_t capacity = 9216; //(9K)
+    //const size_t capacity = 102400; //does not work
+
+    Serial.printf("Allocating doc.\r\n");
+    DynamicJsonDocument doc(capacity);
+    String Link;
+    HTTPClient http;    //Declare object of class HTTPClient
+
+    //"C:\Program Files\Git\usr\bin\openssl.exe" s_client -connect rlicorp.visualstudio.com:443 | "C:\Program Files\Git\usr\bin\openssl.exe" x509 -fingerprint -noout
+    //SHA1 Fingerprint=79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3
+    const char* fingerprint = "79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3";
+
+    Serial.printf("Encoding API Key...\r\n");
+    sslClient.setInsecure();
+
+    Serial.printf("Adding headers...\r\n");
+    http.setAuthorization(ado_apiaccesstokenString, ado_apiaccesstokenString);
+
+    http.setUserAgent(UserAgent);
+
+
+    //GET Data
+    //The link to Marine
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/Marine/_apis/git/pullrequests?api-version=5.0";
+    //Tests ALL Pull Requests in org.
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0";
+    Link = ado_connectionString;
+
+    Serial.printf("HTTP Begin...\r\n");
+    http.begin(Link, fingerprint);     //Specify request destination
+
+    Serial.printf("HTTP GET...\r\n");
+    int httpCode = http.GET();            //Send the request
+    Serial.printf("END GET...\r\n");
+    Serial.println(httpCode);   //Print HTTP return code
+
+    //// HTTP client errors
+    //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
+    //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
+    //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
+    //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
+    //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
+    //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
+    //#define HTTPC_ERROR_NO_STREAM           (-6)
+    //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
+    //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
+    //#define HTTPC_ERROR_ENCODING            (-9)
+    //#define HTTPC_ERROR_STREAM_WRITE        (-10)
+    //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
+
+    illuminateRing(0, 0, 0, 0);
+    illuminateRing(1, 0, 0, 0);
+    illuminateRing(2, 0, 0, 0);
+    illuminateRing(3, 0, 0, 0);
+
+    //if (httpCode > 0) { //Check the returning code
+    //    if (httpCode == 200) {
+    //        //WAS 200!!   Yeah!! - SLOW GREEN
+    //        for (size_t i = 0; i < 5; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Green
+    //                illuminateRing(4, 0, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(600);
+    //        }
+    //    }
+    //    else {
+    //        //not 200 - FAST YELLOW
+    //        for (size_t i = 0; i < 100; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Yellow
+    //                illuminateRing(4, 250, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(100);
+    //        }
+    //    }
+    //}
+    //else {
+    //    for (size_t i = 0; i < 100; i++)
+    //    {
+    //        //MEDIUM RED
+    //        if (i % 2 == 0) {
+    //            illuminateRing(4, 250, 0, 0);
+    //        }
+    //        else {
+    //            illuminateRing(4, 0, 0, 0);
+    //        }
+    //    FastLED.show();
+    //    delay(300);
+    //    }
+    //}
+    //delay(10000);
+
+    Serial.printf("HTTP getString()...\r\n");
+    String payload = http.getString();    //Get the response payload
+    Serial.println(payload);    //Print request response payload
+
+    Serial.printf("HTTP end()...\r\n");
+    http.end();  //Close connection
+
+    //===================================================================
+
+    Serial.printf("Deserializing payload now...\r\n");
+    DeserializationError error = deserializeJson(doc, payload);
+
+    Serial.printf("Deserializing COMPLETE...\r\n");
+
+    Serial.printf("Checking error object...\r\n");
+    if (error)
+    {
+        Serial.printf("ERROR parsing json.\r\n");
+
+        String err = String(error.c_str());
+        //could be IncompleteInput - payload too long
+        Serial.println(err);
+        for (size_t i = 0; i < 10; i++)
+        {
+            if (i % 2 == 0)
+                FastLED.showColor(CRGB::Chartreuse);
+            if (i % 3 == 0)
+                FastLED.showColor(CRGB::DarkRed);
+            else
+                FastLED.showColor(CRGB::Honeydew);
+
+            delay(1000);
+        }
+        return;
+    }
+
+    Serial.printf("Past the parsing checks...\r\n");
+    FastLED.showColor(CRGB::Green);
+    FastLED.show();
+    delay(5000);
+
+    clearLEDs();
+    FastLED.show();
+
+    illuminateRing(4, 0, 0, 250);
+    FastLED.show();
+    delay(1000);
+
+    Serial.printf("Getting Count...\r\n");
+    int count = doc["count"];
+    Serial.printf("trying to show the count...\r\n");
+    Serial.printf("Found PRs in json: %d ", count);
+    Serial.printf("---------------\r\n");
+    Serial.printf("\r\n");
+
+    if (count > 0) {
+        Serial.printf("Setting glitter...\r\n");
+        rainbowWithGlitter();
+        FastLED.show();
+        delay(5000);
+    }
+    else {
+        illuminateRing(1, 250, 250, 0);
+        illuminateRing(2, 250, 250, 0);
+        illuminateRing(3, 250, 250, 0);
+        illuminateRing(4, 250, 250, 0);
+        FastLED.show();
+    }
+
+
+    illuminateRing(4, 0, 250, 0);
+    FastLED.show();
+    delay(1000);
+
+    illuminateRing(0, 0, 200, 0);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
+
+    Serial.printf("End of test.\r\n");
+}
 #pragma endregion
 
 //#####################################################################################
