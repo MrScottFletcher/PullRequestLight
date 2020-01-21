@@ -52,9 +52,6 @@ bool gReverseDirection = false;
 CRGB leds[NUM_LEDS];
 
 typedef void (*SimplePatternList[])();
-//FOR gPatterns:
-//SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle, bpm };
-SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle};
 
 typedef void (*DisplayPatternFunction)(void);
 
@@ -83,6 +80,409 @@ int led_ring_counts[NUM_LEDS_RINGS]{ NUM_LEDS_RING_01, NUM_LEDS_RING_02,NUM_LEDS
 //###############################################
 
 #pragma endregion
+
+
+
+//########################################################################################################
+
+
+//=======================================================================================
+// For gPatterns, list of patterns to cycle through.  Each is defined as a separate function below.
+#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
+
+void rainbow() 
+{
+  // FastLED's built-in rainbow generator
+  fill_rainbow( leds, NUM_LEDS, gHue, 7);
+}
+
+void rainbowWithGlitter() 
+{
+  // built-in FastLED rainbow, plus some random sparkly glitter
+  rainbow();
+  addGlitter(80);
+}
+
+void addGlitter( fract8 chanceOfGlitter) 
+{
+  if( random8() < chanceOfGlitter) {
+    leds[ random16(NUM_LEDS) ] += CRGB::White;
+  }
+}
+
+void confetti() 
+{
+  // random colored speckles that blink in and fade smoothly
+  fadeToBlackBy( leds, NUM_LEDS, 10);
+  int pos = random16(NUM_LEDS);
+  leds[pos] += CHSV( gHue + random8(64), 200, 255);
+}
+
+void sinelon()
+{
+  // a colored dot sweeping back and forth, with fading trails
+  fadeToBlackBy( leds, NUM_LEDS, 20);
+  int pos = beatsin16( 13, 0, NUM_LEDS-1 );
+  leds[pos] += CHSV( gHue, 255, 192);
+}
+
+void bpm()
+{
+  // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
+  uint8_t BeatsPerMinute = 62;
+  CRGBPalette16 palette = PartyColors_p;
+  uint8_t beat = beatsin8( BeatsPerMinute, 64, 255);
+  for( int i = 0; i < NUM_LEDS; i++) { //9948
+    leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
+  }
+}
+
+void juggle() {
+  // eight colored dots, weaving in and out of sync with each other
+  fadeToBlackBy( leds, NUM_LEDS, 20);
+  byte dothue = 0;
+  for( int i = 0; i < 8; i++) {
+    leds[beatsin16( i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
+    dothue += 32;
+  }
+}
+
+//#####################################################################################
+// Fire2012 by Mark Kriegsman, July 2012
+// as part of "Five Elements" shown here: http://youtu.be/knWiGsmgycY
+//// 
+// This basic one-dimensional 'fire' simulation works roughly as follows:
+// There's a underlying array of 'heat' cells, that model the temperature
+// at each point along the line.  Every cycle through the simulation, 
+// four steps are performed:
+//  1) All cells cool down a little bit, losing heat to the air
+//  2) The heat from each cell drifts 'up' and diffuses a little
+//  3) Sometimes randomly new 'sparks' of heat are added at the bottom
+//  4) The heat from each cell is rendered as a color into the leds array
+//     The heat-to-color mapping uses a black-body radiation approximation.
+//
+// Temperature is in arbitrary units from 0 (cold black) to 255 (white hot).
+//
+// This simulation scales it self a bit depending on NUM_LEDS; it should look
+// "OK" on anywhere from 20 to 100 LEDs without too much tweaking. 
+//
+// I recommend running this simulation at anywhere from 30-100 frames per second,
+// meaning an interframe delay of about 10-35 milliseconds.
+//
+// Looks best on a high-density LED setup (60+ pixels/meter).
+//
+//
+// There are two main parameters you can play with to control the look and
+// feel of your fire: COOLING (used in step 1 above), and SPARKING (used
+// in step 3 above).
+//
+// COOLING: How much does the air cool as it rises?
+// Less cooling = taller flames.  More cooling = shorter flames.
+// Default 50, suggested range 20-100 
+#define COOLING  55
+
+// SPARKING: What chance (out of 255) is there that a new spark will be lit?
+// Higher chance = more roaring fire.  Lower chance = more flickery fire.
+// Default 120, suggested range 50-200.
+#define SPARKING 120
+
+
+void Fire2012()
+{
+    //NOTE - requires caller to do FastLED.Show() and Delay();
+// Array of temperature readings at each simulation cell
+  static byte heat[NUM_LEDS];
+
+  // Step 1.  Cool down every cell a little
+    for( int i = 0; i < NUM_LEDS; i++) {
+      heat[i] = qsub8( heat[i],  random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
+    }
+  
+    // Step 2.  Heat from each cell drifts 'up' and diffuses a little
+    for( int k= NUM_LEDS - 1; k >= 2; k--) {
+      heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
+    }
+    
+    // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
+    if( random8() < SPARKING ) {
+      int y = random8(7);
+      heat[y] = qadd8( heat[y], random8(160,255) );
+    }
+
+    // Step 4.  Map from heat cells to LED colors
+    for( int j = 0; j < NUM_LEDS; j++) {
+      CRGB color = HeatColor( heat[j]);
+      int pixelnumber;
+      if( gReverseDirection ) {
+        pixelnumber = (NUM_LEDS-1) - j;
+      } else {
+        pixelnumber = j;
+      }
+      leds[pixelnumber] = color;
+    }
+}
+
+
+void FireRings(int loops, int delayms)
+{
+    // Array of temperature readings at each simulation cell
+    static byte heat[NUM_LEDS_RINGS];
+    if (delayms < 1) delayms = 1;
+    for (size_t z = 0; z < loops; z++)
+    {
+        // Step 1.  Cool down every cell a little
+        for (int i = 0; i < NUM_LEDS_RINGS; i++) {
+            heat[i] = qsub8(heat[i], random8(0, ((COOLING * 10) / NUM_LEDS_RINGS) + 2));
+        }
+
+        // Step 2.  Heat from each cell drifts 'up' and diffuses a little
+        for (int k = NUM_LEDS_RINGS - 1; k >= 2; k--) {
+            heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2]) / 3;
+        }
+
+        // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
+        if (random8() < SPARKING) {
+            int y = random8(7);
+            heat[y] = qadd8(heat[y], random8(160, 255));
+        }
+
+        int currentLedStripIndex = 0;
+        // Step 4.  Map from heat cells to LED colors
+        for (int j = 0; j < NUM_LEDS_RINGS; j++)
+        {
+            CRGB color1 = HeatColor(heat[j]);
+            double thisRingCount = led_ring_counts[j];
+            //hit LED in the ring that matches the degress
+            for (int i = 0; i < thisRingCount; i++)
+            {
+                leds[currentLedStripIndex] = color1;
+                currentLedStripIndex++;
+            }
+        }
+        FastLED.show();
+        delay(delayms);
+    }
+}
+
+#pragma endregion
+
+//FOR gPatterns:
+//SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle, bpm };
+SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle};
+
+
+void nextPattern()
+{
+  // add one to the current pattern number, and wrap around at the end
+  gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE( gPatterns);
+}
+//#####################################################################################
+
+#pragma region TEST METHOD FOR TRYING STUFF
+
+void testParsing() {
+
+    FastLED.setBrightness(200);
+    //-------------------------------------
+    //SERIAL
+    //-------------------------------------
+    illuminateRing(0, 0, 100, 100);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
+
+    //const size_t capacity = 4790; //from a sample
+    const size_t capacity = 9216; //(9K)
+    //const size_t capacity = 102400; //does not work
+
+    Serial.printf("Allocating doc.\r\n");
+    DynamicJsonDocument doc(capacity);
+    String Link;
+    HTTPClient http;    //Declare object of class HTTPClient
+
+    //"C:\Program Files\Git\usr\bin\openssl.exe" s_client -connect rlicorp.visualstudio.com:443 | "C:\Program Files\Git\usr\bin\openssl.exe" x509 -fingerprint -noout
+    //SHA1 Fingerprint=79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3
+    const char* fingerprint = "79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3";
+
+    Serial.printf("Encoding API Key...\r\n");
+    sslClient.setInsecure();
+
+    Serial.printf("Adding headers...\r\n");
+    http.setAuthorization(ado_apiaccesstokenString, ado_apiaccesstokenString);
+
+    http.setUserAgent(UserAgent);
+
+
+    //GET Data
+    //The link to Marine
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/Marine/_apis/git/pullrequests?api-version=5.0";
+    //Tests ALL Pull Requests in org.
+    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0";
+    Link = ado_connectionString;
+
+    Serial.printf("HTTP Begin...\r\n");
+    http.begin(Link, fingerprint);     //Specify request destination
+
+    Serial.printf("HTTP GET...\r\n");
+    int httpCode = http.GET();            //Send the request
+    Serial.printf("END GET...\r\n");
+    Serial.println(httpCode);   //Print HTTP return code
+
+    //// HTTP client errors
+    //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
+    //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
+    //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
+    //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
+    //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
+    //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
+    //#define HTTPC_ERROR_NO_STREAM           (-6)
+    //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
+    //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
+    //#define HTTPC_ERROR_ENCODING            (-9)
+    //#define HTTPC_ERROR_STREAM_WRITE        (-10)
+    //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
+
+    illuminateRing(0, 0, 0, 0);
+    illuminateRing(1, 0, 0, 0);
+    illuminateRing(2, 0, 0, 0);
+    illuminateRing(3, 0, 0, 0);
+
+    //if (httpCode > 0) { //Check the returning code
+    //    if (httpCode == 200) {
+    //        //WAS 200!!   Yeah!! - SLOW GREEN
+    //        for (size_t i = 0; i < 5; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Green
+    //                illuminateRing(4, 0, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(600);
+    //        }
+    //    }
+    //    else {
+    //        //not 200 - FAST YELLOW
+    //        for (size_t i = 0; i < 100; i++)
+    //        {
+    //            if (i % 2 == 0) {
+    //                //Yellow
+    //                illuminateRing(4, 250, 250, 0);
+    //            }
+    //            else {
+    //                illuminateRing(4, 0, 0, 0);
+    //            }
+    //            FastLED.show();
+    //            delay(100);
+    //        }
+    //    }
+    //}
+    //else {
+    //    for (size_t i = 0; i < 100; i++)
+    //    {
+    //        //MEDIUM RED
+    //        if (i % 2 == 0) {
+    //            illuminateRing(4, 250, 0, 0);
+    //        }
+    //        else {
+    //            illuminateRing(4, 0, 0, 0);
+    //        }
+    //    FastLED.show();
+    //    delay(300);
+    //    }
+    //}
+    //delay(10000);
+
+    Serial.printf("HTTP getString()...\r\n");
+    String payload = http.getString();    //Get the response payload
+    Serial.println(payload);    //Print request response payload
+
+    Serial.printf("HTTP end()...\r\n");
+    http.end();  //Close connection
+
+    //===================================================================
+
+    Serial.printf("Deserializing payload now...\r\n");
+    DeserializationError error = deserializeJson(doc, payload);
+
+    Serial.printf("Deserializing COMPLETE...\r\n");
+
+    Serial.printf("Checking error object...\r\n");
+    if (error)
+    {
+        Serial.printf("ERROR parsing json.\r\n");
+
+        String err = String(error.c_str());
+        //could be IncompleteInput - payload too long
+        Serial.println(err);
+        for (size_t i = 0; i < 10; i++)
+        {
+            if (i % 2 == 0)
+                FastLED.showColor(CRGB::Chartreuse);
+            if (i % 3 == 0)
+                FastLED.showColor(CRGB::DarkRed);
+            else
+                FastLED.showColor(CRGB::Honeydew);
+
+            delay(1000);
+        }
+        return;
+    }
+
+    Serial.printf("Past the parsing checks...\r\n");
+    FastLED.showColor(CRGB::Green);
+    FastLED.show();
+    delay(5000);
+
+    clearLEDs();
+    FastLED.show();
+
+    illuminateRing(4, 0, 0, 250);
+    FastLED.show();
+    delay(1000);
+
+    Serial.printf("Getting Count...\r\n");
+    int count = doc["count"];
+    Serial.printf("trying to show the count...\r\n");
+    Serial.printf("Found PRs in json: %d ", count);
+    Serial.printf("---------------\r\n");
+    Serial.printf("\r\n");
+
+    if (count > 0) {
+        Serial.printf("Setting glitter...\r\n");
+        rainbowWithGlitter();
+        FastLED.show();
+        delay(5000);
+    }
+    else {
+        illuminateRing(1, 250, 250, 0);
+        illuminateRing(2, 250, 250, 0);
+        illuminateRing(3, 250, 250, 0);
+        illuminateRing(4, 250, 250, 0);
+        FastLED.show();
+    }
+
+
+    illuminateRing(4, 0, 250, 0);
+    FastLED.show();
+    delay(1000);
+
+    illuminateRing(0, 0, 200, 0);
+    FastLED.show();
+    delay(300);
+    BlinkRed(1);
+
+    Serial.printf("End of test.\r\n");
+}
+
+
+
+
+//########################################################################################################
+
+
 
 //=================================================================
 
@@ -203,7 +603,7 @@ void loop() {
     time_t et;
 
     //?We're going to this every loop, but we might throttle later.
-    if (loopCount == 0 || loopCount % 10 == 0) {
+    if (loopCount < 5 || loopCount % 10 == 0) {
         et = GetTime();
         Serial.printf("Fetched NTP epoch time is: %lu.\r\n", et);
     }
@@ -212,7 +612,7 @@ void loop() {
     
     //This "et" will not be updated until the above if triggers.  This is kind of a hot mess.
     //Byproduct of polk-and-prod experiemntation...
-    if (lastTimeCheck + pollingCheckIntervalSeconds < et) {
+    if (et - pollingCheckIntervalSeconds > lastTimeCheck) {
         lastTimeCheck = et;
         //Illinois is GMT-6, so "0" == 6PM.  "12" is 6AM.
         bool in_activeTime = (t->tm_hour > 12);
@@ -224,12 +624,19 @@ void loop() {
         }
         else
         {
+          if(loopCount < 5){
+            //Free ride around the board.  Might not have a good timestamp yet.
+             Serial.printf("HOUR is: %d we're going to check again soon.  \r\n", t->tm_hour);
+             delay(3000);
+          }
+          else{
             Serial.printf("Pausing because HOUR is: %d.\r\n", t->tm_hour);
             //Shut all the lights off
             FastLED.setBrightness(0);
             FastLED.show();
             //hold for a bit since we're - like two minutes
             delay(240000);
+          }
         }
     }
     else {
@@ -265,10 +672,12 @@ void UpdatePrCounts() {
 void ChangeStates_PrCount(int newPrCount) {
 
     if (newPrCount > 0) {
-        for (size_t i = 0; i < 7; i++)
+        for (size_t i = 0; i < 10; i++)
         {
-            fadeIn(CRGB::Blue, 100, 75);
-            fadeOut(CRGB::Blue, 100, 75);
+            //200 overloads something?
+            fadeIn(CRGB::Blue, 15, 200);
+            delay(10000);
+            fadeOut(CRGB::Blue, 15, 200);
         }
     }
     //This is the smarter State Change version...
@@ -307,8 +716,9 @@ int getPrCount() {
     if (httpCode != 200) {
         for (size_t i = 0; i < 2; i++)
         {
-            fadeIn(CRGB::Crimson, 20, 25);
-            fadeOut(CRGB::Crimson, 20, 25);
+            fadeIn(CRGB::Crimson, 20, 100);
+            FastLED.delay(3000);
+            fadeOut(CRGB::Crimson, 20, 100);
         }
 
         return -1;
@@ -337,10 +747,11 @@ int getPrCount() {
         {
             String err = String(error.c_str());
             Serial.println(err);
-            for (size_t i = 0; i < 2; i++)
+            for (size_t i = 0; i < 5; i++)
             {
-                fadeIn(CRGB::Yellow, 10, 25);
-                fadeOut(CRGB::Yellow, 10, 25);
+                fadeIn(CRGB::Yellow, 10, 200);
+                delay(10000);
+                fadeOut(CRGB::Yellow, 10, 200);
             }
 
             return -1;
@@ -558,7 +969,9 @@ time_t GetTime() {
 void fadeIn(CRGB color, uint8_t loopDelayMs, uint8_t maxBrightness) {
 
     for (uint8_t b = 0; b < 255; b++) {
-        FastLED.showColor(color, b * maxBrightness / 255);
+        int bright = b * maxBrightness / 255;
+        FastLED.showColor(color, bright);
+        //Serial.printf("FADE IN BRIGHTNESS: %d.\r\n", bright);
         delay(loopDelayMs);
     };
 };
@@ -567,8 +980,10 @@ void fadeIn(CRGB color, uint8_t loopDelayMs, uint8_t maxBrightness) {
 //1000 / 
 void fadeOut(CRGB color, uint8_t loopDelayMs, uint8_t maxBrightness)
 {
-    for (uint8_t b = 255; b > 0; b--) {
-        FastLED.showColor(color, b * maxBrightness / 255);
+    for (uint8_t b = 254; b > 0; b--) {
+        int bright = b * maxBrightness / 255;
+        FastLED.showColor(color, bright);
+        //Serial.printf("FADE OUT BRIGHTNESS: %d.\r\n", bright);
         delay(loopDelayMs);
     };
 }
@@ -824,392 +1239,7 @@ void BlinkRed(int count){
   }
 }
 
-//=======================================================================================
-// For gPatterns, list of patterns to cycle through.  Each is defined as a separate function below.
-#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
 
-void nextPattern()
-{
-  // add one to the current pattern number, and wrap around at the end
-  gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE( gPatterns);
-}
-
-void rainbow() 
-{
-  // FastLED's built-in rainbow generator
-  fill_rainbow( leds, NUM_LEDS, gHue, 7);
-}
-
-void rainbowWithGlitter() 
-{
-  // built-in FastLED rainbow, plus some random sparkly glitter
-  rainbow();
-  addGlitter(80);
-}
-
-void addGlitter( fract8 chanceOfGlitter) 
-{
-  if( random8() < chanceOfGlitter) {
-    leds[ random16(NUM_LEDS) ] += CRGB::White;
-  }
-}
-
-void confetti() 
-{
-  // random colored speckles that blink in and fade smoothly
-  fadeToBlackBy( leds, NUM_LEDS, 10);
-  int pos = random16(NUM_LEDS);
-  leds[pos] += CHSV( gHue + random8(64), 200, 255);
-}
-
-void sinelon()
-{
-  // a colored dot sweeping back and forth, with fading trails
-  fadeToBlackBy( leds, NUM_LEDS, 20);
-  int pos = beatsin16( 13, 0, NUM_LEDS-1 );
-  leds[pos] += CHSV( gHue, 255, 192);
-}
-
-void bpm()
-{
-  // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
-  uint8_t BeatsPerMinute = 62;
-  CRGBPalette16 palette = PartyColors_p;
-  uint8_t beat = beatsin8( BeatsPerMinute, 64, 255);
-  for( int i = 0; i < NUM_LEDS; i++) { //9948
-    leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
-  }
-}
-
-void juggle() {
-  // eight colored dots, weaving in and out of sync with each other
-  fadeToBlackBy( leds, NUM_LEDS, 20);
-  byte dothue = 0;
-  for( int i = 0; i < 8; i++) {
-    leds[beatsin16( i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
-    dothue += 32;
-  }
-}
-
-//#####################################################################################
-// Fire2012 by Mark Kriegsman, July 2012
-// as part of "Five Elements" shown here: http://youtu.be/knWiGsmgycY
-//// 
-// This basic one-dimensional 'fire' simulation works roughly as follows:
-// There's a underlying array of 'heat' cells, that model the temperature
-// at each point along the line.  Every cycle through the simulation, 
-// four steps are performed:
-//  1) All cells cool down a little bit, losing heat to the air
-//  2) The heat from each cell drifts 'up' and diffuses a little
-//  3) Sometimes randomly new 'sparks' of heat are added at the bottom
-//  4) The heat from each cell is rendered as a color into the leds array
-//     The heat-to-color mapping uses a black-body radiation approximation.
-//
-// Temperature is in arbitrary units from 0 (cold black) to 255 (white hot).
-//
-// This simulation scales it self a bit depending on NUM_LEDS; it should look
-// "OK" on anywhere from 20 to 100 LEDs without too much tweaking. 
-//
-// I recommend running this simulation at anywhere from 30-100 frames per second,
-// meaning an interframe delay of about 10-35 milliseconds.
-//
-// Looks best on a high-density LED setup (60+ pixels/meter).
-//
-//
-// There are two main parameters you can play with to control the look and
-// feel of your fire: COOLING (used in step 1 above), and SPARKING (used
-// in step 3 above).
-//
-// COOLING: How much does the air cool as it rises?
-// Less cooling = taller flames.  More cooling = shorter flames.
-// Default 50, suggested range 20-100 
-#define COOLING  55
-
-// SPARKING: What chance (out of 255) is there that a new spark will be lit?
-// Higher chance = more roaring fire.  Lower chance = more flickery fire.
-// Default 120, suggested range 50-200.
-#define SPARKING 120
-
-
-void Fire2012()
-{
-    //NOTE - requires caller to do FastLED.Show() and Delay();
-// Array of temperature readings at each simulation cell
-  static byte heat[NUM_LEDS];
-
-  // Step 1.  Cool down every cell a little
-    for( int i = 0; i < NUM_LEDS; i++) {
-      heat[i] = qsub8( heat[i],  random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
-    }
-  
-    // Step 2.  Heat from each cell drifts 'up' and diffuses a little
-    for( int k= NUM_LEDS - 1; k >= 2; k--) {
-      heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
-    }
-    
-    // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
-    if( random8() < SPARKING ) {
-      int y = random8(7);
-      heat[y] = qadd8( heat[y], random8(160,255) );
-    }
-
-    // Step 4.  Map from heat cells to LED colors
-    for( int j = 0; j < NUM_LEDS; j++) {
-      CRGB color = HeatColor( heat[j]);
-      int pixelnumber;
-      if( gReverseDirection ) {
-        pixelnumber = (NUM_LEDS-1) - j;
-      } else {
-        pixelnumber = j;
-      }
-      leds[pixelnumber] = color;
-    }
-}
-
-
-void FireRings(int loops, int delayms)
-{
-    // Array of temperature readings at each simulation cell
-    static byte heat[NUM_LEDS_RINGS];
-    if (delayms < 1) delayms = 1;
-    for (size_t z = 0; z < loops; z++)
-    {
-        // Step 1.  Cool down every cell a little
-        for (int i = 0; i < NUM_LEDS_RINGS; i++) {
-            heat[i] = qsub8(heat[i], random8(0, ((COOLING * 10) / NUM_LEDS_RINGS) + 2));
-        }
-
-        // Step 2.  Heat from each cell drifts 'up' and diffuses a little
-        for (int k = NUM_LEDS_RINGS - 1; k >= 2; k--) {
-            heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2]) / 3;
-        }
-
-        // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
-        if (random8() < SPARKING) {
-            int y = random8(7);
-            heat[y] = qadd8(heat[y], random8(160, 255));
-        }
-
-        int currentLedStripIndex = 0;
-        // Step 4.  Map from heat cells to LED colors
-        for (int j = 0; j < NUM_LEDS_RINGS; j++)
-        {
-            CRGB color1 = HeatColor(heat[j]);
-            double thisRingCount = led_ring_counts[j];
-            //hit LED in the ring that matches the degress
-            for (int i = 0; i < thisRingCount; i++)
-            {
-                leds[currentLedStripIndex] = color1;
-                currentLedStripIndex++;
-            }
-        }
-        FastLED.show();
-        delay(delayms);
-    }
-}
-
-#pragma endregion
-
-//#####################################################################################
-
-#pragma region TEST METHOD FOR TRYING STUFF
-
-void testParsing() {
-
-    FastLED.setBrightness(200);
-    //-------------------------------------
-    //SERIAL
-    //-------------------------------------
-    illuminateRing(0, 0, 100, 100);
-    FastLED.show();
-    delay(300);
-    BlinkRed(1);
-
-    //const size_t capacity = 4790; //from a sample
-    const size_t capacity = 9216; //(9K)
-    //const size_t capacity = 102400; //does not work
-
-    Serial.printf("Allocating doc.\r\n");
-    DynamicJsonDocument doc(capacity);
-    String Link;
-    HTTPClient http;    //Declare object of class HTTPClient
-
-    //"C:\Program Files\Git\usr\bin\openssl.exe" s_client -connect rlicorp.visualstudio.com:443 | "C:\Program Files\Git\usr\bin\openssl.exe" x509 -fingerprint -noout
-    //SHA1 Fingerprint=79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3
-    const char* fingerprint = "79:DA:31:82:67:4D:25:43:77:18:24:8F:BA:6C:6E:5D:18:55:2E:A3";
-
-    Serial.printf("Encoding API Key...\r\n");
-    sslClient.setInsecure();
-
-    Serial.printf("Adding headers...\r\n");
-    http.setAuthorization(ado_apiaccesstokenString, ado_apiaccesstokenString);
-
-    http.setUserAgent(UserAgent);
-
-
-    //GET Data
-    //The link to Marine
-    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/Marine/_apis/git/pullrequests?api-version=5.0";
-    //Tests ALL Pull Requests in org.
-    //Link = "https://rlicorp.visualstudio.com/DefaultCollection/_apis/git/pullrequests?api-version=5.0";
-    Link = ado_connectionString;
-
-    Serial.printf("HTTP Begin...\r\n");
-    http.begin(Link, fingerprint);     //Specify request destination
-
-    Serial.printf("HTTP GET...\r\n");
-    int httpCode = http.GET();            //Send the request
-    Serial.printf("END GET...\r\n");
-    Serial.println(httpCode);   //Print HTTP return code
-
-    //// HTTP client errors
-    //https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient/src/ESP8266HTTPClient.h#L49
-    //#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
-    //#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
-    //#define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
-    //#define HTTPC_ERROR_NOT_CONNECTED       (-4)
-    //#define HTTPC_ERROR_CONNECTION_LOST     (-5)
-    //#define HTTPC_ERROR_NO_STREAM           (-6)
-    //#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
-    //#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
-    //#define HTTPC_ERROR_ENCODING            (-9)
-    //#define HTTPC_ERROR_STREAM_WRITE        (-10)
-    //#define HTTPC_ERROR_READ_TIMEOUT        (-11)
-
-    illuminateRing(0, 0, 0, 0);
-    illuminateRing(1, 0, 0, 0);
-    illuminateRing(2, 0, 0, 0);
-    illuminateRing(3, 0, 0, 0);
-
-    //if (httpCode > 0) { //Check the returning code
-    //    if (httpCode == 200) {
-    //        //WAS 200!!   Yeah!! - SLOW GREEN
-    //        for (size_t i = 0; i < 5; i++)
-    //        {
-    //            if (i % 2 == 0) {
-    //                //Green
-    //                illuminateRing(4, 0, 250, 0);
-    //            }
-    //            else {
-    //                illuminateRing(4, 0, 0, 0);
-    //            }
-    //            FastLED.show();
-    //            delay(600);
-    //        }
-    //    }
-    //    else {
-    //        //not 200 - FAST YELLOW
-    //        for (size_t i = 0; i < 100; i++)
-    //        {
-    //            if (i % 2 == 0) {
-    //                //Yellow
-    //                illuminateRing(4, 250, 250, 0);
-    //            }
-    //            else {
-    //                illuminateRing(4, 0, 0, 0);
-    //            }
-    //            FastLED.show();
-    //            delay(100);
-    //        }
-    //    }
-    //}
-    //else {
-    //    for (size_t i = 0; i < 100; i++)
-    //    {
-    //        //MEDIUM RED
-    //        if (i % 2 == 0) {
-    //            illuminateRing(4, 250, 0, 0);
-    //        }
-    //        else {
-    //            illuminateRing(4, 0, 0, 0);
-    //        }
-    //    FastLED.show();
-    //    delay(300);
-    //    }
-    //}
-    //delay(10000);
-
-    Serial.printf("HTTP getString()...\r\n");
-    String payload = http.getString();    //Get the response payload
-    Serial.println(payload);    //Print request response payload
-
-    Serial.printf("HTTP end()...\r\n");
-    http.end();  //Close connection
-
-    //===================================================================
-
-    Serial.printf("Deserializing payload now...\r\n");
-    DeserializationError error = deserializeJson(doc, payload);
-
-    Serial.printf("Deserializing COMPLETE...\r\n");
-
-    Serial.printf("Checking error object...\r\n");
-    if (error)
-    {
-        Serial.printf("ERROR parsing json.\r\n");
-
-        String err = String(error.c_str());
-        //could be IncompleteInput - payload too long
-        Serial.println(err);
-        for (size_t i = 0; i < 10; i++)
-        {
-            if (i % 2 == 0)
-                FastLED.showColor(CRGB::Chartreuse);
-            if (i % 3 == 0)
-                FastLED.showColor(CRGB::DarkRed);
-            else
-                FastLED.showColor(CRGB::Honeydew);
-
-            delay(1000);
-        }
-        return;
-    }
-
-    Serial.printf("Past the parsing checks...\r\n");
-    FastLED.showColor(CRGB::Green);
-    FastLED.show();
-    delay(5000);
-
-    clearLEDs();
-    FastLED.show();
-
-    illuminateRing(4, 0, 0, 250);
-    FastLED.show();
-    delay(1000);
-
-    Serial.printf("Getting Count...\r\n");
-    int count = doc["count"];
-    Serial.printf("trying to show the count...\r\n");
-    Serial.printf("Found PRs in json: %d ", count);
-    Serial.printf("---------------\r\n");
-    Serial.printf("\r\n");
-
-    if (count > 0) {
-        Serial.printf("Setting glitter...\r\n");
-        rainbowWithGlitter();
-        FastLED.show();
-        delay(5000);
-    }
-    else {
-        illuminateRing(1, 250, 250, 0);
-        illuminateRing(2, 250, 250, 0);
-        illuminateRing(3, 250, 250, 0);
-        illuminateRing(4, 250, 250, 0);
-        FastLED.show();
-    }
-
-
-    illuminateRing(4, 0, 250, 0);
-    FastLED.show();
-    delay(1000);
-
-    illuminateRing(0, 0, 200, 0);
-    FastLED.show();
-    delay(300);
-    BlinkRed(1);
-
-    Serial.printf("End of test.\r\n");
-}
 #pragma endregion
 
 //#####################################################################################
